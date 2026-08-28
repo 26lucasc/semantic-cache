@@ -16,12 +16,19 @@ RUN uv pip install --system --no-cache \
         --extra-index-url https://download.pytorch.org/whl/cpu \
         -r requirements.txt
 
-# Bake the embedding model into the image. Downloading it at boot makes the
-# first request take ~8s and makes startup depend on HuggingFace being up.
+# Bake BOTH models into the image. Downloading at boot makes the first request
+# take ~8s and makes startup depend on HuggingFace being up -- and the runtime
+# user cannot write to /models anyway, so a lazy download fails with EACCES the
+# first time Layer 2 runs. Bake both or the semantic layer 500s.
 COPY embedder.py normalize.py config.py ./
-RUN python -c "from sentence_transformers import SentenceTransformer; \
-               SentenceTransformer('all-MiniLM-L6-v2')" \
+RUN python -c "from sentence_transformers import SentenceTransformer, CrossEncoder; \
+               SentenceTransformer('all-MiniLM-L6-v2'); \
+               CrossEncoder('cross-encoder/quora-distilroberta-base')" \
     && chmod -R a+rX /models
+
+# Never reach for the network at runtime: fail loudly on a missing model
+# instead of hanging on a download that cannot be written anyway.
+ENV HF_HUB_OFFLINE=1
 
 COPY . .
 

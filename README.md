@@ -300,6 +300,20 @@ On Railway / Render / Fly: point it at this repo, add a persistent volume
 mounted at `/data`, and set the key in the platform's environment-variable UI
 (`.env` is gitignored and never ships).
 
+Verified on a real build (image 2.47GB, 415MB resident):
+
+```
+llm       cached=False  sim=0.000  3694.8ms  'how do I reset my password'
+exact     cached=True   sim=1.000     2.3ms  'How do I reset my password?'
+exact     cached=True   sim=1.000     1.9ms  'HOW DO I   reset my password'
+semantic  cached=True   sim=0.605   270.6ms  'how do I change my login credentials'
+llm       cached=False  sim=0.518   867.0ms  'how do I reset my API key'
+```
+
+The last two lines are the thesis: 0.605 served, 0.518 refused. Absolute
+similarity is not the decision. Cache survives `docker restart` with the
+volume mounted.
+
 **Two things that will bite you:**
 
 *Memory depends on which verifier you run.* `VERIFY_BACKEND=crossencoder`
