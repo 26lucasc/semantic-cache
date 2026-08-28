@@ -27,7 +27,27 @@ after any change; nothing here is hand-written.
 
 Defaults need no API keys: embeddings run locally (`all-MiniLM-L6-v2`) and
 generation is a fake backend that sleeps 800ms. Set `LLM_BACKEND=anthropic`
-for real answers. See `.env.example`.
+for real answers. Create a `.env` (gitignored) with whichever of these you
+need:
+
+```bash
+VERIFY_BACKEND=anthropic        # crossencoder (local, free, 4% accurate) | anthropic
+VERIFY_LLM=claude-haiku-4-5     # sonnet-5 is 2.7x slower for one extra hit
+VERIFY_ACCEPT=0.97              # local backend only
+ANTHROPIC_API_KEY=sk-ant-...
+# ANTHROPIC_WORKSPACE_ID=wrkspc_...   # only for identity-linked keys
+
+LLM_BACKEND=fake                # fake sleeps 800ms, no key | anthropic
+LLM_MODEL=claude-sonnet-5
+EMBED_BACKEND=local             # local | openai
+EMBED_MODEL=all-MiniLM-L6-v2
+
+CACHE_VERIFY=1                  # 1 = two-stage, 0 = single threshold
+CACHE_TOP_K=5                   # candidates handed to the verifier
+CACHE_FLOOR=0.15                # NOT a decision threshold; keeps garbage out
+CACHE_TTL=3600
+CACHE_DB=cache.db               # point at a mounted volume in a container
+```
 
 ## Finding: no single threshold works with MiniLM
 
