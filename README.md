@@ -130,6 +130,11 @@ work disappear, it moves it: off a metered GPU and onto your own box. That is
 usually the trade you want -- local CPU is far cheaper than inference -- but
 "76% less compute" would be false. It is 76% less *inference*.
 
+**These benchmark numbers predate the LLM verifier** -- they were measured
+with the local cross-encoder, so the semantic layer was barely contributing.
+Re-run `benchmark.py` with `VERIFY_BACKEND=anthropic` for current figures, and
+note a semantic hit now costs ~880ms rather than ~15ms.
+
 **Semantic matching contributes 12 of the 76 points.** Most of the win is
 plain exact-match caching. The semantic layer is what the whole project is
 about, and it is the minority of the benefit -- worth knowing before you
@@ -235,7 +240,7 @@ accept   hits  FALSE_HITS  rejects   hit_rate
 **40% hit rate at zero false hits, against 20% for the single-threshold
 design.** Both are safe; one serves twice as much.
 
-### Then it failed on held-out data
+### It failed on held-out data -- with the LOCAL verifier
 
 The 50 pairs above were written by the same person who then tuned `ACCEPT`
 against them. On `eval_heldout.py` -- 25 paraphrase pairs written afterwards
@@ -255,12 +260,56 @@ verification 4%                (1/25 accepted)
 ```
 
 Every right answer was handed to the verifier. The verifier threw it away. So
-the two-stage argument is intact and stage 2 needs a model that actually reads
--- an LLM, not a fine-tuned classifier. That is wired up
-(`VERIFY_BACKEND=anthropic`, Haiku 4.5) and **untested**, because this machine
-has no API key.
+stage 2 needed a model that reads rather than pattern-matches.
 
-Do not quote the 40% figure. It is an in-sample number.
+Do not quote the 40% figure. It is an in-sample number from the local model.
+
+### Then an LLM verifier fixed it
+
+`VERIFY_BACKEND=anthropic`, Claude Haiku 4.5. Held-out set:
+
+```
+threshold-only   (cosine >= 0.98)        0/25     0%
+local verifier   (cross-encoder)         1/25     4%
+Claude verifier  (haiku-4-5)            25/25   100%
+```
+
+And on the set that includes 25 deliberate traps -- the one that catches a
+verifier which just says yes to everything:
+
+```
+                    haiku-4-5   sonnet-5
+correct hits          23/25       24/25
+FALSE HITS                2           1
+traps refused         23/25       24/25
+p50 latency           880ms      2362ms
+```
+
+**Haiku is the pick.** Sonnet buys one hit and one trap for 2.7x the latency
+and 2x the price. Not worth it for a job this narrow.
+
+What still fails is negation, exactly as predicted:
+
+```
+'which deleted tasks cannot be recovered'  ->  served 'can I recover deleted tasks'
+'when is billing not prorated'             ->  served 'is billing prorated'
+```
+
+Cosine rated these 0.887 and 0.853; the cross-encoder let five such pairs
+through. Haiku misses two of five, Sonnet one. Much better, not solved. The
+prompt already names negation explicitly, so this may be a tier ceiling.
+
+### A bug that looked like a finding
+
+The first Haiku run scored 3/25 and nearly got written up as a capability
+limit. It was `max_tokens=8` plus "reply with a number" -- the model opens
+with `'Looking at this question: "how do'` and is truncated before the digit,
+so the parser read every query as no-match. Structured output
+(`output_config.format` with a JSON schema) forces `{"match": N}` instead of
+hoping for a parseable string. 3/25 -> 23/25.
+
+Both bugs found this session were silent: the Docker one 500'd only on
+semantic queries, this one returned plausible low numbers. Neither raised.
 
 ### The consequence that inverts your instinct
 

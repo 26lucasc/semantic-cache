@@ -96,19 +96,48 @@ def verify(query: str, candidates: list[str]) -> int | None:
         return best if scores[best] >= ACCEPT else None
 
     if BACKEND == "anthropic":
+        import json
+
         import anthropic
+        # Identity-linked API keys reject requests without a workspace id:
+        #   400 "anthropic-workspace-id is required when authenticating with
+        #        an identity-linked API key"
+        # Plain keys ignore the header, so sending it when set is always safe.
+        ws = os.getenv("ANTHROPIC_WORKSPACE_ID")
+        client = anthropic.Anthropic(
+            default_headers={"anthropic-workspace-id": ws} if ws else None
+        )
         numbered = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(candidates))
-        msg = anthropic.Anthropic().messages.create(
+        # Structured output, NOT a bare "reply with a number" + small max_tokens.
+        # That combination silently returned zero hits: the model opens with
+        # 'Looking at this question: "how do' and gets cut off mid-preamble, so
+        # the digit parser finds nothing and every query reads as no-match. The
+        # schema forces a parseable answer instead of hoping for one.
+        msg = client.messages.create(
             model=os.getenv("VERIFY_LLM", "claude-haiku-4-5"),
-            max_tokens=8,
+            max_tokens=256,
             messages=[{"role": "user",
                        "content": PROMPT.format(query=query, candidates=numbered)}],
+            output_config={
+                "format": {
+                    "type": "json_schema",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "match": {
+                                "type": "integer",
+                                "description": ("1-based index of the candidate with "
+                                                "the same answer, or 0 if none"),
+                            },
+                        },
+                        "required": ["match"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
         )
-        text = "".join(b.text for b in msg.content if b.type == "text").strip()
-        try:
-            pick = int("".join(ch for ch in text if ch.isdigit()) or 0)
-        except ValueError:
-            return None
+        text = next(b.text for b in msg.content if b.type == "text")
+        pick = int(json.loads(text)["match"])
         return pick - 1 if 1 <= pick <= len(candidates) else None
 
     raise ValueError(f"unknown VERIFY_BACKEND: {BACKEND}")
