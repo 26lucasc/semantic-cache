@@ -1,7 +1,9 @@
 """HTTP front door.  Run:  .venv/bin/uvicorn main:app --reload"""
+from pathlib import Path
+
 import metrics
 from fastapi import FastAPI
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, field_validator
 
 from cache import THRESHOLD, TTL_SECONDS, SemanticCache
@@ -24,15 +26,21 @@ class Ask(BaseModel):
         return v.strip()
 
 
+_DEMO = Path(__file__).parent / "demo.html"
+
+
 @app.get("/", include_in_schema=False)
 def root():
-    """Send a browser to the interactive docs.
+    """A page a human can use.
 
-    Without this the bare domain returns FastAPI's {"detail":"Not Found"},
-    which reads as a broken deployment to anyone who opens the link -- the
-    service is fine, there is just no page at /.
+    Without this the bare domain returned FastAPI's {"detail":"Not Found"},
+    which reads as a broken deployment. Swagger at /docs works but asks a
+    visitor to hand-edit JSON; this shows the layer, the similarity score and
+    the matched prompt, which is the part worth seeing.
     """
-    return RedirectResponse("/docs")
+    if _DEMO.exists():
+        return HTMLResponse(_DEMO.read_text(encoding="utf-8"))
+    return RedirectResponse("/docs")   # fall back if the file did not ship
 
 
 @app.post("/v1/ask")
