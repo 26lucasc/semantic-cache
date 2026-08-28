@@ -12,6 +12,7 @@ scores 0.989 -- the highest of any group -- which means those queries were
 being paid for with an embedding call AND a threshold bet when a hash lookup
 would have caught them for free and for certain.
 """
+import config  # noqa: F401  -- loads .env, must come first
 import os
 import time
 

@@ -4,6 +4,7 @@ Default backend is `fake`: it sleeps to imitate real latency and returns a
 canned answer, so the whole system runs end-to-end with no API key. Set
 LLM_BACKEND=anthropic + ANTHROPIC_API_KEY when you want real answers.
 """
+import config  # noqa: F401  -- loads .env, must come first
 import hashlib
 import os
 import time

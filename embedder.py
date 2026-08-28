@@ -5,6 +5,7 @@ threshold sweep as many times as you want. Swap EMBED_BACKEND=openai later if
 you want to compare -- part of the project is showing the threshold MOVES when
 the embedding model changes.
 """
+import config  # noqa: F401  -- loads .env, must come first
 import functools
 import os
 

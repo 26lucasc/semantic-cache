@@ -47,6 +47,7 @@ Backends:
                                         eval_heldout.py with
                                         VERIFY_BACKEND=anthropic to check.
 """
+import config  # noqa: F401  -- loads .env, must come first
 import functools
 import os
 
