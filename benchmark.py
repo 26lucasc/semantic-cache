@@ -155,7 +155,7 @@ def report(off, on):
     print(f"    vectors in RAM      {on['vec_kb']:.1f} KB  "
           f"({on['vec_kb'] * 1024 / max(on['entries'], 1):.0f} bytes/entry)")
     print(f"    sqlite on disk      {on['db_kb']:.1f} KB")
-    print(f"    model RAM           {model_rss():.0f} MB (embedder + cross-encoder)")
+    print(f"    model RAM           {model_rss():.0f} MB (torch + whatever VERIFY_BACKEND loads)")
     print(f"    CPU time            {off['cpu_s']:.1f}s -> {on['cpu_s']:.1f}s")
     print()
 

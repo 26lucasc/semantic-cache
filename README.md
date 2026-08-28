@@ -95,57 +95,54 @@ pool. Read the combined table.
 
 ## Benchmark: with vs without, identical traffic
 
-`benchmark.py`, 200 requests, 54 distinct, 30% unique never-repeating tail.
-Two-stage verification on, accept 0.97.
+200 requests, 54 distinct, 30% unique never-repeating tail. Two-stage
+verification on, Claude Haiku 4.5 as the verifier.
 
 ```
                           no cache    with cache
-  wall clock                160.7s         50.6s     69% less
-  throughput (req/s)          1.24          3.95     3x
-  mean latency               803ms         253ms     69% less
-  p50 latency                804ms           1ms    100% less
-  p95 latency                805ms         866ms      8% WORSE
+  inference calls              200            34     83% less
+  output tokens               3702           640     83% less
+  cost / 1k requests        $0.198        $0.034     83% less
 
-  inference calls              200            47     76% less
-  input tokens                1302           324     75% less
-  output tokens               3702           888     76% less
-  cost / 1k requests        $0.198        $0.048     76% less
+  wall clock                160.8s        154.0s      4% less
+  throughput (req/s)          1.24          1.30      1.0x
+  p50 latency                804ms         897ms     12% WORSE
+  p95 latency                805ms        1846ms    129% WORSE
 
-  hit rate                       -     76%  (64% exact + 12% semantic)
-  vectors in RAM                 -     70.5 KB (1536 bytes/entry)
-  sqlite on disk                 -     112 KB
-  model RAM                      -     532 MB
-  CPU time                    0.0s     3.4s
+  hit rate                       -    83%  (36% exact + 47% semantic)
+  vectors in RAM                 -    51 KB (1536 bytes/entry)
+  CPU time                    0.0s    4.1s
 ```
 
-**Read the three uncomfortable rows before the good ones.**
+**The LLM verifier trades speed for cost.** Compare against the same benchmark
+run with the local cross-encoder:
 
-**p95 got worse.** Cache misses now pay an embedding *and* a verifier call
-before the generation they were always going to make. Median latency collapses
-to 1ms and the tail gets slightly slower. If you are p95-bound rather than
-cost-bound, that is a real regression, not a rounding error.
+```
+                     local verifier   Claude verifier
+  hit rate                  76%             83%
+    of which semantic       12pp            47pp
+  cost reduction            76%             83%
+  throughput                3.0x            1.0x
+  p95                    +8% worse      +129% worse
+```
 
-**532 MB of RAM, and CPU goes from nothing to 3.4s.** The cache does not make
-work disappear, it moves it: off a metered GPU and onto your own box. That is
-usually the trade you want -- local CPU is far cheaper than inference -- but
-"76% less compute" would be false. It is 76% less *inference*.
+The semantic layer went from contributing 12 points to 47 -- it is now doing
+most of the work rather than riding along behind exact-match. That is the
+whole project functioning.
 
-**These benchmark numbers predate the LLM verifier** -- they were measured
-with the local cross-encoder, so the semantic layer was barely contributing.
-Re-run `benchmark.py` with `VERIFY_BACKEND=anthropic` for current figures, and
-note a semantic hit now costs ~880ms rather than ~15ms.
+But every Layer 2 decision now costs an ~880ms API call, and misses pay it
+*before* generating. So a miss runs ~1700ms instead of ~800ms, and the 3x
+throughput win is gone. **If you are latency-bound, this configuration is
+worse than no cache at all.** If you are cost-bound, it is 83% cheaper.
 
-**Semantic matching contributes 12 of the 76 points.** Most of the win is
-plain exact-match caching. The semantic layer is what the whole project is
-about, and it is the minority of the benefit -- worth knowing before you
-attribute the headline number to the interesting part.
+The obvious next move, unmeasured: skip verification when the top candidate is
+above some high similarity (~0.95) and serve directly. Those are the cases
+cosine already gets right, and it would restore the fast path for them. It
+reintroduces a threshold, but only as an optimisation on the safe end, not as
+the decision.
 
-Caveats on the good rows: generation is **modeled**, not measured (see the
-header comment in `benchmark.py`) -- `llm.py`'s fake backend sleeps 800ms and
-derives token counts from text length, priced at Sonnet 5 list. The hit rate
-is real; what each hit is worth depends on your model. And 54 distinct queries
-over 200 requests is a favorable repeat distribution. Rerun with
-`LLM_BACKEND=anthropic` and your own traffic before quoting the cost line.
+Sonnet 5 is worse on this axis: 2362ms per verification against Haiku's 880ms,
+for one extra hit and one extra trap caught.
 
 ## Replay: the mechanism works
 

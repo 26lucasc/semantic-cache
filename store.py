@@ -128,15 +128,48 @@ class Store:
         )
         self.db.commit()
 
-    def evict_expired(self, ttl_seconds: float):
-        """TODO(you): staleness. A cached 'refunds take 30 days' outlives the
-        policy change that made it 14. TTL is the crude fix; an explicit
-        invalidate-by-topic endpoint is the real one."""
-        raise NotImplementedError
+    def evict_expired(self, ttl_seconds: float) -> int:
+        """Delete entries older than the TTL. Returns how many were removed.
 
-    def evict_lru(self, max_entries: int):
-        """TODO(you): unbounded growth. Drop least-recently-hit entries."""
-        raise NotImplementedError
+        cache.py already REFUSES to serve a stale entry, so this is about
+        reclaiming space, not correctness. It still matters: without it the
+        table and the in-memory matrix grow forever, and every query pays to
+        compute cosine against vectors that can never be served.
+
+        Staleness itself is only crudely handled by age. A cached "refunds take
+        30 days" outlives the policy change that made it 14, and it is no less
+        wrong at 29 days than at 31. Invalidate-by-topic is the real fix; TTL
+        is the blunt instrument that keeps the table bounded meanwhile.
+        """
+        cutoff = time.time() - ttl_seconds
+        n = self.db.execute(
+            "DELETE FROM entries WHERE created_at < ?", (cutoff,)
+        ).rowcount
+        self.db.commit()
+        if n:
+            self._load()   # REQUIRED: the matrix is a snapshot. Skip this and
+        return n           # deleted vectors stay searchable until restart.
+
+    def evict_lru(self, max_entries: int) -> int:
+        """Keep the `max_entries` most recently used rows, drop the rest.
+
+        Ordered by last_hit, which record_hit() maintains and add() seeds with
+        the insert time -- so an entry that is never hit ages out on its
+        creation time rather than living forever.
+
+        LRU beats least-frequently-used here because cache value follows what
+        users are asking NOW; a question that was popular last month and is
+        dead today should lose to a fresh one regardless of lifetime hits.
+        """
+        n = self.db.execute(
+            "DELETE FROM entries WHERE id NOT IN ("
+            "  SELECT id FROM entries ORDER BY last_hit DESC LIMIT ?)",
+            (max_entries,),
+        ).rowcount
+        self.db.commit()
+        if n:
+            self._load()
+        return n
 
     def stats(self):
         row = self.db.execute(

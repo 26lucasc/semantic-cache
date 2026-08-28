@@ -57,12 +57,63 @@ def is_safe_to_cache(answer: str) -> bool:
     return not answer.startswith(_ERROR_PREFIXES)
 
 
+# Nouns that name a per-user fact rather than a topic. The answer to a
+# question about one of these is different for every user, so a shared cache
+# entry is a data leak, not a stale answer.
+_PERSONAL_NOUNS = (
+    "balance", "invoice", "invoices", "receipt", "receipts", "order", "orders",
+    "appointment", "appointments", "ticket", "tickets", "usage", "quota",
+    "subscription", "plan", "payment", "payments", "refund", "card",
+    "address", "email", "password", "api key", "api keys", "token",
+    "account", "profile", "settings", "history", "data",
+)
+
+# Predicates that name a per-user fact without using a noun from the list
+# above -- "how much do I owe" has no personal NOUN but is plainly personal.
+_PERSONAL_PREDICATES = ("owe", "spent", "paid", "signed up", "am i on",
+                        "do i have", "have i used", "am i charged")
+
+# First-person markers. "my balance" is personal; "the balance" is not.
+_FIRST_PERSON = (" my ", " mine", " i ", " me ", " our ", " we ")
+
+# Instructional framings. "how do I check my balance" wants the PROCEDURE,
+# which is identical for every user and therefore safe to cache. Only a
+# question asking for the VALUE is personal. This distinction is the whole
+# point -- a naive `"my" in prompt` check refuses to cache both.
+_INSTRUCTIONAL = (
+    "how do i", "how to", "how can i", "how would i", "where do i",
+    "where can i", "what is the way", "what\'s the way", "steps to",
+    "the process", "the procedure", "the setup", "can i ", "is it possible",
+    "am i able", "do you support", "does it support",
+)
+
+
 def is_cacheable(prompt: str) -> bool:
-    """TODO(you): some prompts must never be shared across users.
-    'what is my account balance' is the obvious one. A keyword denylist is the
-    start; per-user cache keys (tenant=user_id) are the real fix, and the store
-    already supports that."""
-    return True
+    """False for prompts whose answer is specific to one user.
+
+    A cache entry is shared by construction, so caching "what is my balance"
+    serves one user's number to the next person who asks something similar.
+    That is a data leak with a plausible-looking answer attached -- worse than
+    a wrong answer, because nothing about it looks wrong.
+
+    This is a keyword heuristic and it WILL have both false positives and false
+    negatives; see eval_cacheable.py for the measured boundary. The real fix is
+    per-user cache keys (`tenant=user_id`), which the store already supports --
+    then personal answers are cached but never shared. Use both: partitioning
+    for correctness, this for defence in depth when a caller forgets to pass a
+    tenant.
+    """
+    p = f" {prompt.lower().strip()} "
+
+    if not any(m in p for m in _FIRST_PERSON):
+        return True                                  # nothing personal claimed
+    if not (any(f" {n} " in p or f" {n}?" in p for n in _PERSONAL_NOUNS)
+            or any(v in p for v in _PERSONAL_PREDICATES)):
+        return True                                  # personal, but no user data
+    # Reached only when the prompt claims something personal AND names user
+    # data. Cacheable only if it asks HOW rather than WHAT -- a procedure is
+    # the same for everyone, a value is not.
+    return any(i in p for i in _INSTRUCTIONAL)
 
 
 class SemanticCache:
@@ -125,12 +176,16 @@ class SemanticCache:
         # A bypassed request must NOT populate the cache. It is the no-cache
         # baseline; storing would make it pay embedding and write costs the
         # baseline does not actually have, and corrupt the comparison.
-        if layer != "bypass" and is_safe_to_cache(result["answer"]) and is_cacheable(prompt):
+        if layer == "bypass":
+            pass                                     # baseline: never populate
+        elif not is_safe_to_cache(result["answer"]):
+            metrics.bump("poisoned_skips")           # an error response
+        elif not is_cacheable(prompt):
+            metrics.bump("personal_skips")           # per-user data; see eval_cacheable.py
+        else:
             if vector is None:
                 vector = embed(prompt)
             self.store.add(tenant, prompt, query_hash(prompt), result["answer"], vector)
-        else:
-            metrics.bump("poisoned_skips")
         return {"answer": result["answer"], "cached": False, "layer": layer,
                 "similarity": similarity, "matched_prompt": None,
                 "cost": result["cost"],

@@ -3,7 +3,8 @@ not a monitoring system."""
 import threading
 
 _lock = threading.Lock()
-_c = {"exact_hits": 0, "semantic_hits": 0, "misses": 0, "bypasses": 0, "poisoned_skips": 0}
+_c = {"exact_hits": 0, "semantic_hits": 0, "misses": 0, "bypasses": 0, "poisoned_skips": 0,
+      "personal_skips": 0}
 
 
 def bump(name: str) -> None:
