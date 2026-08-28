@@ -28,6 +28,12 @@ def ask(req: Ask):
     return cache.ask(req.prompt, req.tenant, bypass=req.bypass_cache)
 
 
+@app.get("/health")
+def health():
+    """Liveness probe for the host. Deliberately does not touch the models."""
+    return {"ok": True}
+
+
 @app.get("/v1/stats")
 def stats():
     return {"threshold": THRESHOLD, "ttl_seconds": TTL_SECONDS,

@@ -6,6 +6,7 @@ NumPy. An approximate index (sqlite-vec, pgvector/HNSW, Qdrant) only starts
 paying for itself in the millions. Swapping it in later touches ONLY
 `search()`; nothing else in the codebase knows how search works.
 """
+import os
 import sqlite3
 import time
 
@@ -32,7 +33,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_hash ON entries(tenant, query_hash);
 
 
 class Store:
-    def __init__(self, path: str = "cache.db"):
+    def __init__(self, path: str | None = None):
+        # CACHE_DB lets the container point this at a mounted volume.
+        # On an ephemeral filesystem the cache resets on every deploy.
+        path = path or os.getenv("CACHE_DB", "cache.db")
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.executescript(SCHEMA)
         self._load()

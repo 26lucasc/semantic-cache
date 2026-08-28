@@ -282,6 +282,36 @@ units, and comparative direction all fail identically, for the same reason.
 `EMBED_BACKEND=openai` -- `embedder.py` is swappable for exactly this. It
 would raise recall@k, which is the ceiling on everything downstream.
 
+## Deploying
+
+Container host, not serverless. Two reasons serverless does not work here:
+the torch dependency is ~4.8GB against a 500MB function limit, and more
+fundamentally a cache needs state that outlives a request -- an ephemeral
+filesystem means an empty cache on every cold start, which is strictly worse
+than no cache at all.
+
+```bash
+docker build -t semantic-cache .
+docker run -p 8000:8000 -v semcache:/data \
+  -e ANTHROPIC_API_KEY=sk-ant-... semantic-cache
+```
+
+On Railway / Render / Fly: point it at this repo, add a persistent volume
+mounted at `/data`, and set the key in the platform's environment-variable UI
+(`.env` is gitignored and never ships).
+
+**Two things that will bite you:**
+
+*Memory depends on which verifier you run.* `VERIFY_BACKEND=crossencoder`
+loads both models, ~532MB resident, which will not fit a 512MB free tier.
+`VERIFY_BACKEND=anthropic` never loads the cross-encoder at all (it is
+imported lazily), leaving only the embedder at ~200MB. Since the local
+verifier is measured at 4% recovery on held-out data, the Anthropic backend is
+both the better and the smaller choice.
+
+*Without a volume at `/data`, the cache resets on every deploy.* It will still
+serve requests; the hit rate just starts at zero each time.
+
 ## Layout
 
 | file | what it is |
