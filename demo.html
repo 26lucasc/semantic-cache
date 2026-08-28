@@ -187,9 +187,12 @@ async function stats() {
   try {
     const s = await (await fetch("/v1/stats")).json();
     document.getElementById("stats").textContent =
-      `${s.entries} cached · ${s.exact_hits} exact · ${s.semantic_hits} semantic · ` +
-      `${s.misses} generated · ${(s.hit_rate * 100).toFixed(0)}% hit rate` +
-      (s.personal_skips ? ` · ${s.personal_skips} refused as personal data` : "");
+      // "cached" was ambiguous here: it counts entries STORED, while every
+      // other number counts requests SERVED. Say "stored" and separate them.
+      `${s.entries} answers stored  |  served: ${s.exact_hits} exact, ` +
+      `${s.semantic_hits} semantic, ${s.misses} generated ` +
+      `(${(s.hit_rate * 100).toFixed(0)}% hit rate)` +
+      (s.personal_skips ? `  |  ${s.personal_skips} not stored (personal data)` : "");
   } catch { /* stats are decoration; never block the demo on them */ }
 }
 
