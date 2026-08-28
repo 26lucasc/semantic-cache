@@ -1,6 +1,7 @@
 """HTTP front door.  Run:  .venv/bin/uvicorn main:app --reload"""
 import metrics
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, field_validator
 
 from cache import THRESHOLD, TTL_SECONDS, SemanticCache
@@ -21,6 +22,17 @@ class Ask(BaseModel):
         if not v.strip():
             raise ValueError("prompt cannot be empty")
         return v.strip()
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    """Send a browser to the interactive docs.
+
+    Without this the bare domain returns FastAPI's {"detail":"Not Found"},
+    which reads as a broken deployment to anyone who opens the link -- the
+    service is fine, there is just no page at /.
+    """
+    return RedirectResponse("/docs")
 
 
 @app.post("/v1/ask")
