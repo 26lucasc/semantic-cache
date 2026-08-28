@@ -10,7 +10,7 @@
 import numpy as np
 from embedder import embed_many
 from normalize import query_hash
-from sentence_transformers import CrossEncoder
+from verifier import BACKEND, verify
 
 PAIRS = [
  ("How do I enable TLS verification?", "What's the way to turn on TLS verification?"),
@@ -40,25 +40,42 @@ PAIRS = [
  ("What's the retention period?", "How long is data kept before deletion?"),
 ]
 
-texts = [t for p in PAIRS for t in p]
-v = embed_many(texts)
-cos = [float(np.dot(v[2*i], v[2*i+1])) for i in range(len(PAIRS))]
-ce = CrossEncoder("cross-encoder/quora-distilroberta-base").predict(PAIRS)
-l1 = [query_hash(a) == query_hash(b) for a, b in PAIRS]
 
-print(f"\n{'cosine':>7} {'verif':>7}  {'L1':>3}  {'old':>4} {'new':>4}  pair")
-print("-" * 92)
-for i, (a, b) in enumerate(PAIRS):
-    old = "HIT" if (l1[i] or cos[i] >= 0.98) else "-"
-    new = "HIT" if (l1[i] or ce[i] >= 0.97) else "-"
-    print(f"{cos[i]:7.3f} {ce[i]:7.3f}  {'Y' if l1[i] else '.':>3}  {old:>4} {new:>4}  {a[:34]:34s} | {b[:36]}")
+def main():
+    """Score every pair through the CONFIGURED verifier backend.
 
-old_hits = sum(1 for i in range(len(PAIRS)) if l1[i] or cos[i] >= 0.98)
-new_hits = sum(1 for i in range(len(PAIRS)) if l1[i] or ce[i] >= 0.97)
-print("-" * 92)
-print(f"threshold-only design (cos>=0.98):  {old_hits:2d}/25  {old_hits/25:.0%}")
-print(f"two-stage design      (verif>=0.97): {new_hits:2d}/25  {new_hits/25:.0%}")
-print(f"\ncosine     mean {np.mean(cos):.3f}  min {min(cos):.3f}  max {max(cos):.3f}")
-print(f"verifier   mean {np.mean(ce):.3f}  min {min(ce):.3f}  max {max(ce):.3f}")
-for t in (0.5, 0.7, 0.8, 0.9, 0.95, 0.97, 0.99):
-    print(f"  verifier >= {t:.2f}: {sum(1 for s in ce if s >= t):2d}/25")
+    Routes through verifier.verify() rather than instantiating a model
+    directly, so VERIFY_BACKEND actually selects what runs:
+
+        .venv/bin/python eval_heldout.py                      # local
+        VERIFY_BACKEND=anthropic .venv/bin/python eval_heldout.py
+    """
+    v = embed_many([t for pair in PAIRS for t in pair])
+    cos = [float(np.dot(v[2 * i], v[2 * i + 1])) for i in range(len(PAIRS))]
+
+    accepted = []
+    for a, b in PAIRS:
+        # One candidate: does the verifier think these are the same question?
+        accepted.append(verify(a, [b]) is not None)
+
+    print(f"\nverifier backend: {BACKEND}")
+    print(f"{'cosine':>7}  {'L1':>3} {'old':>4} {'new':>4}  pair")
+    print("-" * 92)
+    for i, (a, b) in enumerate(PAIRS):
+        l1 = query_hash(a) == query_hash(b)
+        old = "HIT" if (l1 or cos[i] >= 0.98) else "-"
+        new = "HIT" if (l1 or accepted[i]) else "-"
+        print(f"{cos[i]:7.3f}  {'Y' if l1 else '.':>3} {old:>4} {new:>4}  "
+              f"{a[:34]:34s} | {b[:36]}")
+
+    old_n = sum(1 for i in range(len(PAIRS))
+                if query_hash(PAIRS[i][0]) == query_hash(PAIRS[i][1]) or cos[i] >= 0.98)
+    new_n = sum(accepted)
+    print("-" * 92)
+    print(f"threshold-only (cosine >= 0.98):     {old_n:2d}/{len(PAIRS)}  {old_n/len(PAIRS):.0%}")
+    print(f"two-stage      (verifier={BACKEND}): {new_n:2d}/{len(PAIRS)}  {new_n/len(PAIRS):.0%}")
+    print(f"\ncosine  mean {np.mean(cos):.3f}  min {min(cos):.3f}  max {max(cos):.3f}")
+
+
+if __name__ == "__main__":
+    main()
