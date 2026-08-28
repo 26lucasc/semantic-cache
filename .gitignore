@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.db
+.env
+sweep_out.txt
+bench_out.txt
